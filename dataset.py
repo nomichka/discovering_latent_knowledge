@@ -1,7 +1,3 @@
-import os
-import functools
-import argparse
-import copy
 
 import numpy as np
 import pandas as pd
@@ -20,14 +16,14 @@ from datasets import load_dataset
 
 
 ############# Data #############
-class ContrastDataset(Dataset):
+class ContrastInContextDataset(Dataset):
     """
     Given a dataset and tokenizer (from huggingface), along with a collection of prompts for that dataset from promptsource and a corresponding prompt index, 
     returns a dataset that creates contrast pairs using that prompt
     
     Truncates examples larger than max_len, which can mess up contrast pairs, so make sure to only give it examples that won't be truncated.
     """
-    def __init__(self, raw_dataset, tokenizer, all_prompts, prompt_idx, 
+    def __init__(self, raw_dataset, tokenizer, all_prompts, prompt_idx, context_num=10, corrupt_prob=0,
                  model_type="encoder_decoder", use_decoder=False, device="cuda"):
 
         # data and tokenizer
@@ -46,6 +42,10 @@ class ContrastDataset(Dataset):
         # prompt
         prompt_name_list = list(all_prompts.name_to_id_mapping.keys())
         self.prompt = all_prompts[prompt_name_list[prompt_idx]]
+
+        # context
+        self.context_num = context_num
+        self.corrupt_prob = corrupt_prob
 
     def __len__(self):
         return len(self.raw_dataset)
@@ -122,11 +122,48 @@ class ContrastDataset(Dataset):
 
         return input_ids
 
+    def get_decoder_input_ids_in_context(self, questions, answers):
+        combined_input = [question + " " + answer for question, answer in zip(questions, answers)] + [self.tokenizer.eos_token]
+        combined_inputs = (" ").join(combined_input)
+        input_ids = self.tokenizer(combined_inputs, truncation=True, padding="max_length", return_tensors="pt")
+
+        return combined_input, input_ids
+
+    def encode_in_context(self, prompt, context_prompts):
+        # get question and answer from prompt
+        question, answer = prompt
+        context_questions = [context_prompt[0] for context_prompt in context_prompts].append(question)
+        context_answers = [context_prompt[1] for context_prompt in context_prompts].append(answer)
+        if self.model_type == "decoder":
+            combined_input, input_ids = self.get_decoder_input_ids_in_context(context_questions, context_answers)
+        else:
+            print("unsupported!")
+        
+        # # tokenize the question and answer (depending upon the model type and whether self.use_decoder is True)
+        # if self.model_type == "encoder_decoder":
+        #     input_ids = self.get_encoder_decoder_input_ids(question, answer)
+        # elif self.model_type == "encoder":
+        #     input_ids = self.get_encoder_input_ids(question, answer)
+        # else:
+        #     input_ids = self.get_decoder_input_ids(question, answer)
+        
+        # get rid of the batch dimension since this will be added by the Dataloader
+        if input_ids["input_ids"].shape[0] == 1:
+            for k in input_ids:
+                input_ids[k] = input_ids[k].squeeze(0)
+
+        return combined_input, input_ids
+
 
     def __getitem__(self, index):
         # get the original example
         data = self.raw_dataset[int(index)]
         text, true_answer = data["text"], data["label"]
+
+        # get the random context
+        context_inds = np.random.uniform(low=0, high=len(self.raw_dataset), size=self.context_num).astype(np.int32)
+        context_data = self.raw_dataset.select(context_inds)
+        context_texts, context_true_answers = context_data["text"], context_data["label"]
 
         # get the possible labels
         # (for simplicity assume the binary case for contrast pairs)
@@ -141,14 +178,23 @@ class ContrastDataset(Dataset):
         # (for example, label 0 might be mapped to "no" and label 1 might be mapped to "yes")
         neg_prompt, pos_prompt = self.prompt.apply(neg_example), self.prompt.apply(pos_example)
 
-        # tokenize
-        neg_ids, pos_ids = self.encode(neg_prompt), self.encode(pos_prompt)
+        # construct a list of tuples of (prompt, output)
+        context_prompts = [self.prompt.apply({"text": context_text, "label": context_answer}) for context_text, context_answer in zip(context_texts, context_true_answers)]
+        
+        combined_neg_input, neg_ids = self.encode_in_context(neg_prompt, context_prompts)
+        combined_pos_input, pos_ids = self.encode_in_context(pos_prompt, context_prompts)
+
+        print(combined_neg_input)
+
+        # # tokenize
+        # neg_ids, pos_ids = self.encode(neg_prompt), self.encode(pos_prompt)
 
         # verify these are different (e.g. tokenization didn't cut off the difference between them)
         if self.use_decoder and self.model_type == "encoder_decoder":
             assert (neg_ids["decoder_input_ids"] - pos_ids["decoder_input_ids"]).sum() != 0, print("The decoder_input_ids for the contrast pairs are the same!", neg_ids, pos_ids)
         else:
             assert (neg_ids["input_ids"] - pos_ids["input_ids"]).sum() != 0, print("The input_ids for the contrast pairs are the same!", neg_ids, pos_ids)
+
 
         # return the tokenized inputs, the text prompts, and the true label
         return neg_ids, pos_ids, neg_prompt, pos_prompt, true_answer
@@ -168,9 +214,11 @@ def get_dataloader(dataset_name, split, tokenizer, prompt_idx, batch_size=16, nu
     all_prompts = DatasetTemplates(dataset_name)
 
     # create the ConstrastDataset
-    contrast_dataset = ContrastDataset(raw_dataset, tokenizer, all_prompts, prompt_idx, 
+    contrast_dataset = ContrastInContextDataset(raw_dataset, tokenizer, all_prompts, prompt_idx, context_num=5,
                                        model_type=model_type, use_decoder=use_decoder, 
                                        device=device)
+    
+    contrast_dataset[0]
 
     # get a random permutation of the indices; we'll take the first num_examples of these that do not get truncated
     random_idxs = np.random.permutation(len(contrast_dataset))
