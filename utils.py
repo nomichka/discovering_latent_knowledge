@@ -14,8 +14,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 # make sure to install promptsource, transformers, and datasets!
-from promptsource.templates import DatasetTemplates
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForMaskedLM, AutoModelForCausalLM
+# from promptsource.templates import DatasetTemplates
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForMaskedLM, AutoModelForCausalLM, GPTJForCausalLM
 from datasets import load_dataset
 
 
@@ -73,21 +73,23 @@ def load_model(model_name, cache_dir=None, parallelize=False, device="cuda"):
         full_model_name = model_name
 
     # use the right automodel, and get the corresponding model type
-    try:
-        model = AutoModelForSeq2SeqLM.from_pretrained(full_model_name, cache_dir=cache_dir)
-        model_type = "encoder_decoder"
-    except:
-        try:
-            model = AutoModelForMaskedLM.from_pretrained(full_model_name, cache_dir=cache_dir)
-            model_type = "encoder"
-        except:
-            model = AutoModelForCausalLM.from_pretrained(full_model_name, cache_dir=cache_dir)
-            model_type = "decoder"
+    # try:
+    #     model = AutoModelForSeq2SeqLM.from_pretrained(full_model_name, cache_dir=cache_dir)
+    #     model_type = "encoder_decoder"
+    # except:
+    #     try:
+    #         model = AutoModelForMaskedLM.from_pretrained(full_model_name, cache_dir=cache_dir)
+    #         model_type = "encoder"
+    #     except:
+    #         model = AutoModelForCausalLM.from_pretrained(full_model_name, cache_dir=cache_dir)
+    #         model_type = "decoder"
+    model = GPTJForCausalLM.from_pretrained("EleutherAI/gpt-j-6B", torch_dtype=torch.float16, low_cpu_mem_usage=True, cache_dir=cache_dir).to("cuda")
+    model_type = "decoder"
     
         
     # specify model_max_length (the max token length) to be 512 to ensure that padding works 
     # (it's not set by default for e.g. DeBERTa, but it's necessary for padding to work properly)
-    tokenizer = AutoTokenizer.from_pretrained(full_model_name, cache_dir=cache_dir, model_max_length=512)
+    tokenizer = AutoTokenizer.from_pretrained(full_model_name, cache_dir=cache_dir)
     model.eval()
 
     # put on the correct device
@@ -364,6 +366,7 @@ def get_individual_hidden_states(model, batch_ids, layer=None, all_layers=True, 
         assert layer is not None
         hs = hs_tuple[layer].unsqueeze(-1).detach().cpu()  # (bs, seq_len, dim, 1)
 
+
     # we want to get the token corresponding to token_idx while ignoring the masked tokens
     if token_idx == 0:
         final_hs = hs[:, 0]  # (bs, dim, num_layers)
@@ -392,7 +395,7 @@ def get_all_hidden_states(model, dataloader, layer=None, all_layers=True, token_
     model.eval()
     for batch in tqdm(dataloader):
         neg_ids, pos_ids, _, _, gt_label = batch
-
+        print(neg_ids)
         neg_hs = get_individual_hidden_states(model, neg_ids, layer=layer, all_layers=all_layers, token_idx=token_idx, 
                                               model_type=model_type, use_decoder=use_decoder)
         pos_hs = get_individual_hidden_states(model, pos_ids, layer=layer, all_layers=all_layers, token_idx=token_idx, 

@@ -149,6 +149,7 @@ class ContrastInContextDataset(Dataset):
         #     input_ids = self.get_decoder_input_ids(question, answer)
         
         # get rid of the batch dimension since this will be added by the Dataloader
+        print(input_ids["input_ids"].shape)
         if input_ids["input_ids"].shape[0] == 1:
             for k in input_ids:
                 input_ids[k] = input_ids[k].squeeze(0)
@@ -188,9 +189,9 @@ class ContrastInContextDataset(Dataset):
         combined_input = ("\n").join(context_prompts)
         
         neg_combined_input = combined_input + "\n" + neg_prompt + self.tokenizer.eos_token
-        print(neg_combined_input)
+        # print(neg_combined_input)
         pos_combined_input = combined_input + "\n" + pos_prompt + self.tokenizer.eos_token
-        print(pos_combined_input)
+        # print(pos_combined_input)
 
         neg_ids = self.tokenizer(neg_combined_input, truncation=True, padding="max_length", return_tensors="pt")
         pos_ids = self.tokenizer(pos_combined_input, truncation=True, padding="max_length", return_tensors="pt")
@@ -211,7 +212,7 @@ class ContrastInContextDataset(Dataset):
         return neg_ids, pos_ids, neg_prompt, pos_prompt, true_answer
 
     
-def get_dataloader(dataset_name, split, tokenizer, prompt_idx, batch_size=16, num_examples=1000,
+def get_dataloader(dataset_name, split, tokenizer, batch_size=16, num_examples=1000,
                    model_type="encoder_decoder", use_decoder=False, device="cuda", pin_memory=True, num_workers=1):
     """
     Creates a dataloader for a given dataset (and its split), tokenizer, and prompt index
