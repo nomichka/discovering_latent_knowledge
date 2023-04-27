@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 # make sure to install promptsource, transformers, and datasets!
-from promptsource.templates import DatasetTemplates
+# from promptsource.templates import DatasetTemplates
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForMaskedLM, AutoModelForCausalLM
 from datasets import load_dataset
 
@@ -23,7 +23,7 @@ class ContrastInContextDataset(Dataset):
     
     Truncates examples larger than max_len, which can mess up contrast pairs, so make sure to only give it examples that won't be truncated.
     """
-    def __init__(self, raw_dataset, tokenizer, all_prompts, prompt_idx, context_num=10, corrupt_prob=0,
+    def __init__(self, raw_dataset, tokenizer, context_num=10, corrupt_prob=0,
                  model_type="encoder_decoder", use_decoder=False, device="cuda"):
 
         # data and tokenizer
@@ -40,8 +40,9 @@ class ContrastInContextDataset(Dataset):
             assert self.model_type != "encoder"
 
         # prompt
-        prompt_name_list = list(all_prompts.name_to_id_mapping.keys())
-        self.prompt = all_prompts[prompt_name_list[prompt_idx]]
+        # prompt_name_list = list(all_prompts.name_to_id_mapping.keys())
+        # self.prompt = all_prompts[prompt_name_list[prompt_idx]]
+        self.prompt = None
 
         # context
         self.context_num = context_num
@@ -158,17 +159,18 @@ class ContrastInContextDataset(Dataset):
     def __getitem__(self, index):
         # get the original example
         data = self.raw_dataset[int(index)]
-        text, true_answer = data["text"], data["label"]
+        text, true_answer = data["content"], data["label"]
 
         # get the random context
         context_inds = np.random.uniform(low=0, high=len(self.raw_dataset), size=self.context_num).astype(np.int32)
         context_data = self.raw_dataset.select(context_inds)
-        context_texts, context_true_answers = context_data["text"], context_data["label"]
+        context_texts, context_true_answers = context_data["content"], context_data["label"]
+        context_answers = ["positive" if context_true_answer == 1 else "negative" for context_true_answer in context_true_answers]
 
-        # get the possible labels
-        # (for simplicity assume the binary case for contrast pairs)
-        label_list = self.prompt.get_answer_choices_list(data)
-        assert len(label_list) == 2, print("Make sure there are only two possible answers! Actual number of answers:", label_list)
+        # # get the possible labels
+        # # (for simplicity assume the binary case for contrast pairs)
+        # label_list = self.prompt.get_answer_choices_list(data)
+        # assert len(label_list) == 2, print("Make sure there are only two possible answers! Actual number of answers:", label_list)
 
         # reconvert to dataset format but with fake/candidate labels to create the contrast pair
         neg_example = {"text": text, "label": 0}
@@ -176,15 +178,24 @@ class ContrastInContextDataset(Dataset):
 
         # construct contrast pairs by answering the prompt with the two different possible labels
         # (for example, label 0 might be mapped to "no" and label 1 might be mapped to "yes")
-        neg_prompt, pos_prompt = self.prompt.apply(neg_example), self.prompt.apply(pos_example)
+        neg_prompt = f"Review: {text}. Sentiment: Negative"
+        pos_prompt = f"Review: {text}. Sentiment: Positive"
+        # neg_prompt, pos_prompt = self.prompt.apply(neg_example), self.prompt.apply(pos_example)
 
         # construct a list of tuples of (prompt, output)
-        context_prompts = [self.prompt.apply({"text": context_text, "label": context_answer}) for context_text, context_answer in zip(context_texts, context_true_answers)]
+        context_prompts = [f"Review: {context_text}. Sentiment: {context_answer}" for context_text, context_answer in zip(context_texts, context_answers)]
         
-        combined_neg_input, neg_ids = self.encode_in_context(neg_prompt, context_prompts)
-        combined_pos_input, pos_ids = self.encode_in_context(pos_prompt, context_prompts)
+        combined_input = ("\n").join(context_prompts)
+        
+        neg_combined_input = combined_input + "\n" + neg_prompt + self.tokenizer.eos_token
+        print(neg_combined_input)
+        pos_combined_input = combined_input + "\n" + pos_prompt + self.tokenizer.eos_token
+        print(pos_combined_input)
 
-        print(combined_neg_input)
+        neg_ids = self.tokenizer(neg_combined_input, truncation=True, padding="max_length", return_tensors="pt")
+        pos_ids = self.tokenizer(pos_combined_input, truncation=True, padding="max_length", return_tensors="pt")
+
+        print("length of tokens", len(self.tokenizer.encode(neg_combined_input, truncation=False)))
 
         # # tokenize
         # neg_ids, pos_ids = self.encode(neg_prompt), self.encode(pos_prompt)
@@ -210,11 +221,11 @@ def get_dataloader(dataset_name, split, tokenizer, prompt_idx, batch_size=16, nu
     # load the raw dataset
     raw_dataset = load_dataset(dataset_name)[split]
 
-    # load all the prompts for that dataset
-    all_prompts = DatasetTemplates(dataset_name)
+    # # load all the prompts for that dataset
+    # all_prompts = DatasetTemplates(dataset_name)
 
     # create the ConstrastDataset
-    contrast_dataset = ContrastInContextDataset(raw_dataset, tokenizer, all_prompts, prompt_idx, context_num=5,
+    contrast_dataset = ContrastInContextDataset(raw_dataset, tokenizer, context_num=10,
                                        model_type=model_type, use_decoder=use_decoder, 
                                        device=device)
     
@@ -223,19 +234,20 @@ def get_dataloader(dataset_name, split, tokenizer, prompt_idx, batch_size=16, nu
     # get a random permutation of the indices; we'll take the first num_examples of these that do not get truncated
     random_idxs = np.random.permutation(len(contrast_dataset))
 
-    # remove examples that would be truncated (since this messes up contrast pairs)
-    prompt_name_list = list(all_prompts.name_to_id_mapping.keys())
-    prompt = all_prompts[prompt_name_list[prompt_idx]]
-    keep_idxs = []
-    for idx in random_idxs:
-        question, answer = prompt.apply(raw_dataset[int(idx)])
-        input_text = question + " " + answer
-        if len(tokenizer.encode(input_text, truncation=False)) < tokenizer.model_max_length - 2:  # include small margin to be conservative
-            keep_idxs.append(idx)
-            if len(keep_idxs) >= num_examples:
-                break
+    # # remove examples that would be truncated (since this messes up contrast pairs)
+    # prompt_name_list = list(all_prompts.name_to_id_mapping.keys())
+    # prompt = all_prompts[prompt_name_list[prompt_idx]]
+    keep_idxs = random_idxs
+    # keep_idxs = []
+    # for idx in random_idxs:
+    #     question, answer = prompt.apply(raw_dataset[int(idx)])
+    #     input_text = question + " " + answer
+    #     if len(tokenizer.encode(input_text, truncation=False)) < tokenizer.model_max_length - 2:  # include small margin to be conservative
+    #         keep_idxs.append(idx)
+    #         if len(keep_idxs) >= num_examples:
+    #             break
 
-    # create and return the corresponding dataloader
+    # # create and return the corresponding dataloader
     subset_dataset = torch.utils.data.Subset(contrast_dataset, keep_idxs)
     dataloader = DataLoader(subset_dataset, batch_size=batch_size, shuffle=False, pin_memory=pin_memory, num_workers=num_workers)
 

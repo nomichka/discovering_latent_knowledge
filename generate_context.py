@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 # make sure to install promptsource, transformers, and datasets!
-from promptsource.templates import DatasetTemplates
+# from promptsource.templates import DatasetTemplates
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForMaskedLM, AutoModelForCausalLM
 from dataset import get_dataloader
 
