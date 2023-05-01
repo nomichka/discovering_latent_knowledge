@@ -248,6 +248,10 @@ def get_dataloader(dataset_name, split, tokenizer, batch_size=16, num_examples=1
     #         if len(keep_idxs) >= num_examples:
     #             break
 
+    # Fix the number of idxs
+    if len(keep_idxs) > num_examples:
+        keep_idxs = keep_idxs[: num_examples]
+
     # # create and return the corresponding dataloader
     subset_dataset = torch.utils.data.Subset(contrast_dataset, keep_idxs)
     dataloader = DataLoader(subset_dataset, batch_size=batch_size, shuffle=False, pin_memory=pin_memory, num_workers=num_workers)
