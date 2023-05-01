@@ -50,6 +50,8 @@ def get_parser():
     parser.add_argument("--prompt_idx", type=int, default=0, help="Which prompt to use")
     parser.add_argument("--batch_size", type=int, default=1, help="Batch size to use")
     parser.add_argument("--num_examples", type=int, default=1000, help="Number of examples to generate")
+    parser.add_argument("--context_num", type=int, default=10, help="Number of context examples")
+    parser.add_argument("--corrupt_prob", type=float, default=0.0, help="Probability of context corruption (by flipping the correct answer)")
     # which hidden states we extract
     parser.add_argument("--use_decoder", action="store_true", help="Whether to use the decoder; only relevant if model_type is encoder-decoder. Uses encoder by default (which usually -- but not always -- works better)")
     parser.add_argument("--layer", type=int, default=-1, help="Which layer to use (if not all layers)")
@@ -57,7 +59,6 @@ def get_parser():
     parser.add_argument("--token_idx", type=int, default=-1, help="Which token to use (by default the last token)")
     # saving the hidden states
     parser.add_argument("--save_dir", type=str, default="generated_hidden_states", help="Directory to save the hidden states")
-
     return parser
 
 
