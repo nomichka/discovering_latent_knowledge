@@ -166,6 +166,11 @@ class ContrastInContextDataset(Dataset):
         context_inds = np.random.uniform(low=0, high=len(self.raw_dataset), size=self.context_num).astype(np.int32)
         context_data = self.raw_dataset.select(context_inds)
         context_texts, context_true_answers = context_data["content"], context_data["label"]
+
+        # corrupt the context with certain probability self.corrupt_prob
+        flip_mask = np.array(np.random.choice(a=[0, 1], size=self.context_num, p=[1 - self.corrupt_prob, self.corrupt_prob]), dtype=np.int32)
+        context_true_answers = abs(context_true_answers - flip_mask)
+
         context_answers = ["positive" if context_true_answer == 1 else "negative" for context_true_answer in context_true_answers]
 
         # # get the possible labels
@@ -212,7 +217,7 @@ class ContrastInContextDataset(Dataset):
         return neg_ids, pos_ids, neg_prompt, pos_prompt, true_answer
 
     
-def get_dataloader(dataset_name, split, tokenizer, batch_size=16, num_examples=1000,
+def get_dataloader(dataset_name, split, tokenizer, batch_size=16, num_examples=1000, context_num=10, corrupt_prob=0.0,
                    model_type="encoder_decoder", use_decoder=False, device="cuda", pin_memory=True, num_workers=1):
     """
     Creates a dataloader for a given dataset (and its split), tokenizer, and prompt index
@@ -226,12 +231,9 @@ def get_dataloader(dataset_name, split, tokenizer, batch_size=16, num_examples=1
     # all_prompts = DatasetTemplates(dataset_name)
 
     # create the ConstrastDataset
-    contrast_dataset = ContrastInContextDataset(raw_dataset, tokenizer, context_num=10,
-                                       model_type=model_type, use_decoder=use_decoder, 
-                                       device=device)
+    contrast_dataset = ContrastInContextDataset(raw_dataset, tokenizer, context_num=context_num, corrupt_prob=corrupt_prob,
+                                       model_type=model_type, use_decoder=use_decoder, device=device)
     
-    contrast_dataset[0]
-
     # get a random permutation of the indices; we'll take the first num_examples of these that do not get truncated
     random_idxs = np.random.permutation(len(contrast_dataset))
 
