@@ -341,6 +341,9 @@ def get_individual_hidden_states(model, batch_ids, layer=None, all_layers=True, 
     If specify_encoder is True, uses "encoder_hidden_states" instead of "hidden_states"
     This is necessary for getting the encoder hidden states for encoder-decoder models,
     but it is not necessary for encoder-only or decoder-only models.
+
+    Return:
+    - final_hs: [bs, model_dim, num_layers]
     """
     if use_decoder:
         assert "decoder" in model_type
@@ -366,6 +369,9 @@ def get_individual_hidden_states(model, batch_ids, layer=None, all_layers=True, 
         assert layer is not None
         hs = hs_tuple[layer].unsqueeze(-1).detach().cpu()  # (bs, seq_len, dim, 1)
 
+    # Fix the original code when bs = 1, make sure the hidden state has shape (bs, seq_len, dim, num_layers)
+    if hs.dim() == 3:
+        hs = hs.unsqueeze(0)
 
     # we want to get the token corresponding to token_idx while ignoring the masked tokens
     if token_idx == 0:
@@ -375,9 +381,9 @@ def get_individual_hidden_states(model, batch_ids, layer=None, all_layers=True, 
         # first we need to get the first mask location for each example in the batch
         assert token_idx < 0, print("token_idx must be either 0 or negative, but got", token_idx)
         mask = batch_ids["decoder_attention_mask"] if (model_type == "encoder_decoder" and use_decoder) else batch_ids["attention_mask"]
-        first_mask_loc = get_first_mask_loc(mask).squeeze()
-        final_hs = hs[torch.arange(hs.size(0)), first_mask_loc+token_idx]  # (bs, dim, num_layers)
-    
+        first_mask_loc = get_first_mask_loc(mask).squeeze().cpu() # Fix location problem
+        final_non_mask_loc = first_mask_loc + token_idx
+        final_hs = hs[torch.arange(hs.size(0)), final_non_mask_loc]  # (bs, dim, num_layers)
     return final_hs
 
 
@@ -388,6 +394,10 @@ def get_all_hidden_states(model, dataloader, layer=None, all_layers=True, token_
 
     The dataloader should correspond to examples *with a candidate label already added* to each example.
     E.g. this function should be used for "Q: Is 2+2=5? A: True" or "Q: Is 2+2=5? A: False", but NOT for "Q: Is 2+2=5? A: ".
+
+    Return:
+        - all_neg_hs, all_pos_hs: [num_examples, model_dim, num_layers]
+        - all_gt_labels: [num_examples]
     """
     all_pos_hs, all_neg_hs = [], []
     all_gt_labels = []
@@ -395,15 +405,15 @@ def get_all_hidden_states(model, dataloader, layer=None, all_layers=True, token_
     model.eval()
     for batch in tqdm(dataloader):
         neg_ids, pos_ids, _, _, gt_label = batch
-        print(neg_ids)
         neg_hs = get_individual_hidden_states(model, neg_ids, layer=layer, all_layers=all_layers, token_idx=token_idx, 
                                               model_type=model_type, use_decoder=use_decoder)
         pos_hs = get_individual_hidden_states(model, pos_ids, layer=layer, all_layers=all_layers, token_idx=token_idx, 
                                               model_type=model_type, use_decoder=use_decoder)
 
-        if dataloader.batch_size == 1:
-            neg_hs, pos_hs = neg_hs.unsqueeze(0), pos_hs.unsqueeze(0)
-
+        # The batch problem is already fixed in <get_individual_hidden_states>
+        # if dataloader.batch_size == 1:
+        #     neg_hs, pos_hs = neg_hs.unsqueeze(0), pos_hs.unsqueeze(0)
+        
         all_neg_hs.append(neg_hs)
         all_pos_hs.append(pos_hs)
         all_gt_labels.append(gt_label)
@@ -411,7 +421,7 @@ def get_all_hidden_states(model, dataloader, layer=None, all_layers=True, token_
     all_neg_hs = np.concatenate(all_neg_hs, axis=0)
     all_pos_hs = np.concatenate(all_pos_hs, axis=0)
     all_gt_labels = np.concatenate(all_gt_labels, axis=0)
-
+    print(all_gt_labels.shape)
     return all_neg_hs, all_pos_hs, all_gt_labels
 
 ############# CCS #############
