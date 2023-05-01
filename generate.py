@@ -10,7 +10,8 @@ def main(args):
     # dataloader = get_dataloader(args.dataset_name, args.split, tokenizer, args.prompt_idx, batch_size=args.batch_size, 
     #                             num_examples=args.num_examples, model_type=model_type, use_decoder=args.use_decoder, device=args.device)
     dataloader = get_dataloader(args.dataset_name, args.split, tokenizer, batch_size=args.batch_size, 
-                                num_examples=args.num_examples, model_type=model_type, use_decoder=args.use_decoder, device=args.device)
+                                num_examples=args.num_examples, context_num=args.context_num, corrupt_prob=args.corrupt_prob, 
+                                model_type=model_type, use_decoder=args.use_decoder, device=args.device)
 
     # Get the hidden states and labels
     print("Generating hidden states")
