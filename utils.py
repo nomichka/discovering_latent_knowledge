@@ -129,6 +129,7 @@ def load_single_generation(args, generation_type="hidden_states"):
     arg_dict = vars(args)
     exclude_keys = ["save_dir", "cache_dir", "device"]
     filename = generation_type + "__" + "__".join(['{}_{}'.format(k, v) for k, v in arg_dict.items() if k not in exclude_keys]) + ".npy".format(generation_type)
+    print("load from ", filename)
     return np.load(os.path.join(args.save_dir, filename))
 
 

@@ -68,9 +68,13 @@ if __name__ == "__main__":
     parser.add_argument("--var_normalize", action="store_true")
     args = parser.parse_args()
     ccs_accs, lr_accs = main(args, generation_args)
+    print(ccs_accs, lr_accs)
     plt.plot(ccs_accs)
     plt.plot(lr_accs)
+    plt.xlabel("layer")
+    plt.ylabel("test accuracy")
     if not os.path.exists("figures"):
         os.makedirs("figures")
-    plt.savefig("figures/accs")
+    filename = ("_").join(args.dataset_name, args.context_num, args.corrupt_prob) 
+    plt.savefig("figures/" + filename)
 

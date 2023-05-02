@@ -24,7 +24,7 @@ class ContrastInContextDataset(Dataset):
     Truncates examples larger than max_len, which can mess up contrast pairs, so make sure to only give it examples that won't be truncated.
     """
     def __init__(self, raw_dataset, tokenizer, context_num=10, corrupt_prob=0,
-                 model_type="encoder_decoder", use_decoder=False, device="cuda"):
+                 model_type="encoder_decoder", use_decoder=False, device="cuda", text_key="content"):
 
         # data and tokenizer
         self.raw_dataset = raw_dataset
@@ -47,6 +47,8 @@ class ContrastInContextDataset(Dataset):
         # context
         self.context_num = context_num
         self.corrupt_prob = corrupt_prob
+
+        self.text_key = text_key
 
     def __len__(self):
         return len(self.raw_dataset)
@@ -160,51 +162,48 @@ class ContrastInContextDataset(Dataset):
     def __getitem__(self, index):
         # get the original example
         data = self.raw_dataset[int(index)]
-        text, true_answer = data["content"], data["label"]
-
-        # get the random context
-        context_inds = np.random.uniform(low=0, high=len(self.raw_dataset), size=self.context_num).astype(np.int32)
-        context_data = self.raw_dataset.select(context_inds)
-        context_texts, context_true_answers = context_data["content"], context_data["label"]
-
-        # corrupt the context with certain probability self.corrupt_prob
-        flip_mask = np.array(np.random.choice(a=[0, 1], size=self.context_num, p=[1 - self.corrupt_prob, self.corrupt_prob]), dtype=np.int32)
-        context_true_answers = abs(context_true_answers - flip_mask)
-
-        context_answers = ["positive" if context_true_answer == 1 else "negative" for context_true_answer in context_true_answers]
-
-        # # get the possible labels
-        # # (for simplicity assume the binary case for contrast pairs)
-        # label_list = self.prompt.get_answer_choices_list(data)
-        # assert len(label_list) == 2, print("Make sure there are only two possible answers! Actual number of answers:", label_list)
-
-        # reconvert to dataset format but with fake/candidate labels to create the contrast pair
-        neg_example = {"text": text, "label": 0}
-        pos_example = {"text": text, "label": 1}
+        # text, true_answer = data["content"], data["label"]
+        text, true_answer = data[self.text_key], data["label"]
 
         # construct contrast pairs by answering the prompt with the two different possible labels
         # (for example, label 0 might be mapped to "no" and label 1 might be mapped to "yes")
         neg_prompt = f"Review: {text}. Sentiment: Negative"
         pos_prompt = f"Review: {text}. Sentiment: Positive"
-        # neg_prompt, pos_prompt = self.prompt.apply(neg_example), self.prompt.apply(pos_example)
 
-        # construct a list of tuples of (prompt, output)
-        context_prompts = [f"Review: {context_text}. Sentiment: {context_answer}" for context_text, context_answer in zip(context_texts, context_answers)]
-        
-        combined_input = ("\n").join(context_prompts)
-        
-        neg_combined_input = combined_input + "\n" + neg_prompt + self.tokenizer.eos_token
-        # print(neg_combined_input)
-        pos_combined_input = combined_input + "\n" + pos_prompt + self.tokenizer.eos_token
-        # print(pos_combined_input)
+        if self.context_num > 0:
+            # get the random context
+            context_inds = np.random.uniform(low=0, high=len(self.raw_dataset), size=self.context_num).astype(np.int32)
+            context_data = self.raw_dataset.select(context_inds)
+            context_texts, context_true_answers = context_data["content"], context_data["label"]
+
+            # corrupt the context with certain probability self.corrupt_prob
+            flip_mask = np.array(np.random.choice(a=[0, 1], size=self.context_num, p=[1 - self.corrupt_prob, self.corrupt_prob]), dtype=np.int32)
+            context_true_answers = abs(context_true_answers - flip_mask)
+
+            context_answers = ["positive" if context_true_answer == 1 else "negative" for context_true_answer in context_true_answers]
+
+            # # get the possible labels
+            # # (for simplicity assume the binary case for contrast pairs)
+            # label_list = self.prompt.get_answer_choices_list(data)
+            # assert len(label_list) == 2, print("Make sure there are only two possible answers! Actual number of answers:", label_list)
+            
+            # construct a list of tuples of (prompt, output)
+            context_prompts = [f"Review: {context_text}. Sentiment: {context_answer}" for context_text, context_answer in zip(context_texts, context_answers)]
+            
+            combined_input = ("\n").join(context_prompts)
+            
+            neg_combined_input = combined_input + "\n" + neg_prompt + self.tokenizer.eos_token
+            pos_combined_input = combined_input + "\n" + pos_prompt + self.tokenizer.eos_token
+        else:
+            neg_combined_input = neg_prompt + self.tokenizer.eos_token
+            pos_combined_input = pos_prompt + self.tokenizer.eos_token
+
 
         neg_ids = self.tokenizer(neg_combined_input, truncation=True, padding="max_length", return_tensors="pt")
         pos_ids = self.tokenizer(pos_combined_input, truncation=True, padding="max_length", return_tensors="pt")
 
         print("length of tokens", len(self.tokenizer.encode(neg_combined_input, truncation=False)))
 
-        # # tokenize
-        # neg_ids, pos_ids = self.encode(neg_prompt), self.encode(pos_prompt)
 
         # verify these are different (e.g. tokenization didn't cut off the difference between them)
         if self.use_decoder and self.model_type == "encoder_decoder":
@@ -229,10 +228,13 @@ def get_dataloader(dataset_name, split, tokenizer, batch_size=16, num_examples=1
 
     # # load all the prompts for that dataset
     # all_prompts = DatasetTemplates(dataset_name)
-
+    if dataset_name == "amazon_polarity":
+        text_key = "content"
+    elif dataset_name == "sst2":
+        text_key = "sentence"
     # create the ConstrastDataset
     contrast_dataset = ContrastInContextDataset(raw_dataset, tokenizer, context_num=context_num, corrupt_prob=corrupt_prob,
-                                       model_type=model_type, use_decoder=use_decoder, device=device)
+                                       model_type=model_type, use_decoder=use_decoder, device=device, text_key=text_key)
     
     # get a random permutation of the indices; we'll take the first num_examples of these that do not get truncated
     random_idxs = np.random.permutation(len(contrast_dataset))
