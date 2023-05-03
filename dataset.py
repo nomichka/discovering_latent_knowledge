@@ -167,8 +167,8 @@ class ContrastInContextDataset(Dataset):
 
         # construct contrast pairs by answering the prompt with the two different possible labels
         # (for example, label 0 might be mapped to "no" and label 1 might be mapped to "yes")
-        neg_prompt = f"Review: {text}. Sentiment: Negative"
-        pos_prompt = f"Review: {text}. Sentiment: Positive"
+        neg_prompt = f"Review: {text}. Sentiment: negative"
+        pos_prompt = f"Review: {text}. Sentiment: positive"
 
         if self.context_num > 0:
             # get the random context
@@ -176,9 +176,9 @@ class ContrastInContextDataset(Dataset):
             context_data = self.raw_dataset.select(context_inds)
             context_texts, context_true_answers = context_data["content"], context_data["label"]
 
-            # corrupt the context with certain probability self.corrupt_prob
-            flip_mask = np.array(np.random.choice(a=[0, 1], size=self.context_num, p=[1 - self.corrupt_prob, self.corrupt_prob]), dtype=np.int32)
-            context_true_answers = abs(context_true_answers - flip_mask)
+            # # corrupt the context with certain probability self.corrupt_prob
+            # flip_mask = np.array(np.random.choice(a=[0, 1], size=self.context_num, p=[1 - self.corrupt_prob, self.corrupt_prob]), dtype=np.int32)
+            # context_true_answers = abs(context_true_answers - flip_mask)
 
             context_answers = ["positive" if context_true_answer == 1 else "negative" for context_true_answer in context_true_answers]
 
@@ -223,6 +223,8 @@ def get_dataloader(dataset_name, split, tokenizer, batch_size=16, num_examples=1
 
     Takes a random subset of (at most) num_examples samples from the dataset that are not truncated by the tokenizer.
     """
+    np.random.seed(0)
+
     # load the raw dataset
     raw_dataset = load_dataset(dataset_name)[split]
 
