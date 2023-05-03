@@ -18,6 +18,7 @@ import torch.nn.functional as F
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForMaskedLM, AutoModelForCausalLM, GPTJForCausalLM
 from datasets import load_dataset
 
+from sklearn.decomposition import PCA
 
 ############# Model loading and result saving #############
 
@@ -423,7 +424,6 @@ def get_all_hidden_states(model, dataloader, layer=None, all_layers=True, token_
     all_neg_hs = np.concatenate(all_neg_hs, axis=0)
     all_pos_hs = np.concatenate(all_pos_hs, axis=0)
     all_gt_labels = np.concatenate(all_gt_labels, axis=0)
-    print(all_gt_labels.shape)
     return all_neg_hs, all_pos_hs, all_gt_labels
 
 ############# CCS #############
@@ -559,3 +559,60 @@ class CCS(object):
                 best_loss = loss
 
         return best_loss
+
+
+class CCSPCA(object):
+    def __init__(self, x0, x1, verbose=False, device="cuda", var_normalize=False):
+        # data
+        self.var_normalize = var_normalize
+        self.x0 = self.normalize(x0)
+        self.x1 = self.normalize(x1)
+        self.d = self.x0.shape[-1]
+
+        self.diff = self.x1 - self.x0   # [n, d] take the differences in normalized hidden states (pos-neg)
+
+        # Create a PCA instance
+        pca = PCA()
+        diff_transformed = pca.fit_transform(self.diff)
+        self.probe = torch.tensor(pca.components_[0, :], dtype=torch.float, device=device)
+
+        self.device = device 
+
+
+    def normalize(self, x):
+        """
+        Mean-normalizes the data x (of shape (n, d))
+        If self.var_normalize, also divides by the standard deviation
+        """
+        normalized_x = x - x.mean(axis=0, keepdims=True)
+        if self.var_normalize:
+            normalized_x /= normalized_x.std(axis=0, keepdims=True)
+
+        return normalized_x
+
+        
+    def get_tensor_data(self):
+        """
+        Returns x0, x1 as appropriate tensors (rather than np arrays)
+        """
+        x0 = torch.tensor(self.x0, dtype=torch.float, requires_grad=False, device=self.device)
+        x1 = torch.tensor(self.x1, dtype=torch.float, requires_grad=False, device=self.device)
+        return x0, x1
+
+
+    def get_acc(self, x0_test, x1_test, y_test):
+        """
+        Computes accuracy for the current parameters on the given test inputs
+        """
+        x0 = torch.tensor(self.normalize(x0_test), dtype=torch.float, requires_grad=False, device=self.device)
+        x1 = torch.tensor(self.normalize(x1_test), dtype=torch.float, requires_grad=False, device=self.device)
+        x = x1 - x0
+
+        with torch.no_grad():
+            p = x @ self.probe
+
+        predictions = (p.detach().cpu().numpy() < 0).astype(int)
+        acc = (predictions == y_test).mean()
+        acc = max(acc, 1 - acc)
+
+        return acc

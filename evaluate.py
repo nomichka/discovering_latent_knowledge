@@ -1,5 +1,5 @@
 from sklearn.linear_model import LogisticRegression
-from utils import get_parser, load_all_generations, CCS
+from utils import get_parser, load_all_generations, CCS, CCSPCA
 import matplotlib.pyplot as plt
 import os
 
@@ -16,6 +16,7 @@ def main(args, generation_args):
         num_layers = neg_hs_all.shape[-1]
         ccs_accuracy_all = []
         lr_accuracy_all = []
+        pca_accuracy_all = []
         for layer in range(num_layers):
             neg_hs = neg_hs_all[..., layer]
             pos_hs = pos_hs_all[..., layer]
@@ -47,10 +48,17 @@ def main(args, generation_args):
             ccs.repeated_train()
             ccs_acc = ccs.get_acc(neg_hs_test, pos_hs_test, y_test)
             print("CCS accuracy: {}".format(ccs_acc))
+
+            # Set up PCA.
+            pca = CCSPCA(neg_hs_train, pos_hs_train)
+            pca_acc = pca.get_acc(neg_hs_test, pos_hs_test, y_test)
+            print("PCA accuracy: {}".format(pca_acc))
+
             ccs_accuracy_all.append(ccs_acc)
             lr_accuracy_all.append(lr_acc)
+            pca_accuracy_all.append(pca_acc)
     
-    return ccs_accuracy_all, lr_accuracy_all
+    return ccs_accuracy_all, lr_accuracy_all, pca_accuracy_all
 
 
 if __name__ == "__main__":
@@ -67,14 +75,15 @@ if __name__ == "__main__":
     parser.add_argument("--weight_decay", type=float, default=0.01)
     parser.add_argument("--var_normalize", action="store_true")
     args = parser.parse_args()
-    ccs_accs, lr_accs = main(args, generation_args)
-    print(ccs_accs, lr_accs)
+    ccs_accs, lr_accs, pca_accuracy_all = main(args, generation_args)
+    print(ccs_accs, lr_accs, pca_accuracy_all)
     plt.plot(ccs_accs)
     plt.plot(lr_accs)
+    plt.plot(pca_accuracy_all)
     plt.xlabel("layer")
     plt.ylabel("test accuracy")
     if not os.path.exists("figures"):
         os.makedirs("figures")
-    filename = ("_").join(args.dataset_name, args.context_num, args.corrupt_prob) 
+    filename = ("_").join((args.dataset_name, int2str(args.context_num), args.corrupt_prob))
     plt.savefig("figures/" + filename)
 
