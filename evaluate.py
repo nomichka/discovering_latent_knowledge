@@ -84,6 +84,6 @@ if __name__ == "__main__":
     plt.ylabel("test accuracy")
     if not os.path.exists("figures"):
         os.makedirs("figures")
-    filename = ("_").join((args.dataset_name, int2str(args.context_num), args.corrupt_prob))
+    filename = ("_").join([args.model_name, args.dataset_name])
     plt.savefig("figures/" + filename)
 
