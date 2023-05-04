@@ -1,63 +1,48 @@
-# Discovering Latent Knowledge Without Supervision
+# Explore Discovering Latent Knowledge Without Supervision 
 
-This repository contains the essential code for Discovering Latent Knowledge in Language Models Without Supervision.
+This repository is a fork of the original codebase https://github.com/collin-burns/discovering_latent_knowledge. For a detailed README.md file, please go to the their repository.
 
-<p align="center">
-<img src="figure.png" width="750">
-</p>
+## 1. Use logical conjunctions to find the “truth” direction of the classifier
 
-We introduce a method for discovering truth-like features directly from model activations in a purely unsupervised way.
+This part is done by Naomi Bashkansky. Go through `jupyter_notebook/conjunction.ipynb` for an overview.
 
-## Abstract
-> Existing techniques for training language models can be misaligned with the truth: if we train models with imitation learning, they may reproduce errors that humans make; if we train them to generate text that humans rate highly, they may output errors that human evaluators can't detect. We propose circumventing this issue by directly finding latent knowledge inside the internal activations of a language model in a purely unsupervised way. Specifically, we introduce a method for accurately answering yes-no questions given only unlabeled model activations. It works by finding a direction in activation space that satisfies logical consistency properties, such as that a statement and its negation have opposite truth values. We show that despite using no supervision and no model outputs, our method can recover diverse knowledge represented in large language models: across 6 models and 10 question-answering datasets, it outperforms zero-shot accuracy by 4\% on average. We also find that it cuts prompt sensitivity in half and continues to maintain high accuracy even when models are prompted to generate incorrect answers. Our results provide an initial step toward discovering what language models know, distinct from what they say, even when we don't have access to explicit ground truth labels.
+## 2. Towards better eliciting latent knowledge on autoregressive models. 
+This part is done by Chuyue Tang. Some bugs in the original codebase are fixed and codes are modified for running experiments in this project.
 
-## Code
-
-We provide three options for code:
-1. A notebook walking through our main method in a simple way: `CCS.ipynb`. This may be the best place to start if you want to understand the method better and play around with it a bit.
-2. More flexible and efficient scripts for using our method in different settings: `generate.py` and `evaluate.py` (both of which rely heavily on `utils.py`). This code is a polished and simplified version of the code used for the paper. This may be the best place to build on if you want to build on our work.
-3. You can also download the original (more comprehensive, but also more complicated and less polished) code [here](https://openreview.net/attachment?id=ETKGuby0hcs&name=supplementary_material).
-
-Below we provide usage details for our main python scripts (`generate.py` and `evaluate.py`).
-
-### Generation
-First, use `generate.py` for (1) creating contrast pairs, and (2) generating hidden states from a model. For example, you can run:
+### 1) Using CCS
+First, use `generate.py` for (1) creating contrast pairs, and (2) generating hidden states from a model. 
 ```
-python generate.py --model_name deberta  --num_examples 400 --batch_size 40
+python generate.py --model_name gpt-j --dataset_name amazon_polarity  --num_examples 500 --all_layers 
 ```
-or
+To generate multi-shot context, you can specify `context_num`.
 ```
-python generate.py --model_name gpt-j --num_examples 100 --batch_size 20
+python generate.py --model_name gpt-j --dataset_name amazon_polarity --num_examples 500 --context_num 10 --all_layers
 ```
-or
+You can also get data with and without context at the same time by setting `context_both`(which is later used by `visualize.py` to generate PCA graph comparing two settings). 
 ```
-CUDA_VISIBLE_DEVICES=0,1 python generate.py --parallelize --model_name t5-11b --num_examples 100 
+python generate.py --model_name gpt-j --dataset_name amazon_polarity --num_examples 100 --context_num 10 --all_layers --context_both
+python visualize.py --model_name gpt-j --dataset_name amazon_polarity --num_examples 100 --context_num 10 --all_layers --context_both
 ```
+Due to the time limit, we do not guarantee that running these commands with other model or dataset settings will work out well.
 
-To use the decoder of an encoder-decoder model (which we found is worse than the encoder for T5 and UnifiedQA, but better than the encoder for T0), specify `--use_decoder`.
+After generating hidden states, you can use `evaluate.py` for running our main method, CCS, on those hidden states. **We highly recommend you to run this file using the same arguments as you run `generate.py`.** 
 
-There are also many optional flags for specifying the dataset (`--dataset`; the default is `imdb`), the cache directory for model weights (`--cache_dir`; the default is `None`), which prompt for the dataset to use (`--prompt_idx`; the default is `0`), where to save the hidden states for all layers in the model (`--all_layers`), and so on.
+In addition to evaluating the performance of CCS, `evaluate.py` also verifies that logistic regression (LR) accuracy is reasonable. 
+We also add a PCA baseline (which is referred to as TPC in the paper).
+You will also get a plot with x-axis as layers and y-axis as accuracy for CCS, LR, and PCA.
 
-### Evaluation 
-After generating hidden states, you can use `evaluate.py` for running our main method, CCS, on those hidden states. Simply run it with the same flags as you used when running `generate.py`, and it will load the correct hidden states for you. For example, if you ran `generate.py` with DeBERTa, generating 400 examples with a batch size of 40 (the first example in the Generation section), then you can run:
+### 2) Using VINC
+Another part of this project is based on the under development codebase https://github.com/EleutherAI/elk.git.
+First, install requirements based on their codebase. Then run
 ```
-python evaluate.py --model_name deberta  --num_examples 400 --batch_size 40
+cd elk
+python elk elicit EleutherAI/gpt-j-6b amazon_polarity --int8 True --max_examples 250 250 --num_variants 1 --num_shots 10 --corrupt_prob 0.0
 ```
-
-In addition to evaluating the performance of CCS, `evaluate.py` also verifies that logistic regression (LR) accuracy is reasonable. This can diagnose why CCS performance may be low; if LR accuracy is low, that suggestions that the model's representations aren't good enough for CCS to work well.
+Here, `num_variants` refers to how many different paraphrase prompts you want to use. By default it uses all available prompt formats from [promptsource](https://github.com/bigscience-workshop/promptsource); `num_shots` refers to how many context examples you want to include before the query statement; `corrupt_prob` is the probability of how each context example's label is flipped.
 
 ### Requirements
 
 This code base was tested on Python 3.7.5 and PyTorch 1.12. It also uses the [datasets](https://pypi.org/project/datasets/) and [promptsource](https://github.com/bigscience-workshop/promptsource) packages for loading and formatting datasets. 
 
-## Citation
 
-If you find this work helpful, please consider citing our paper:
-
-    @article{burns2022dl,
-      title={Discovering Latent Knowledge in Language Models Without Supervision},
-      author={Burns, Collin and Ye, Haotian and Klein, Dan and Steinhardt, Jacob},
-      journal={ArXiV},
-      year={2022}
-    }
 
