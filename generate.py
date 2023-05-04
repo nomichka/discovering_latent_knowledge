@@ -1,4 +1,4 @@
-from utils import get_parser, load_model, get_all_hidden_states, save_generations
+from utils import get_parser, load_model, get_all_hidden_states, save_generations, get_all_hidden_states_context_both
 from dataset import get_dataloader
 
 def main(args):
@@ -10,12 +10,19 @@ def main(args):
     # dataloader = get_dataloader(args.dataset_name, args.split, tokenizer, args.prompt_idx, batch_size=args.batch_size, 
     #                             num_examples=args.num_examples, model_type=model_type, use_decoder=args.use_decoder, device=args.device)
     dataloader = get_dataloader(args.dataset_name, args.split, tokenizer, batch_size=args.batch_size, 
-                                num_examples=args.num_examples, context_num=args.context_num, corrupt_prob=args.corrupt_prob, 
+                                num_examples=args.num_examples, context_num=args.context_num, corrupt_prob=args.corrupt_prob, context_both=args.context_both,
                                 model_type=model_type, use_decoder=args.use_decoder, device=args.device)
 
     # Get the hidden states and labels
     print("Generating hidden states")
-    neg_hs, pos_hs, y = get_all_hidden_states(model, dataloader, layer=args.layer, all_layers=args.all_layers, 
+    if args.context_both:
+        print("generate both")
+        neg_hs, pos_hs, neg_non_hs, pos_non_hs, y = get_all_hidden_states_context_both(model, dataloader, layer=args.layer, all_layers=args.all_layers, 
+                                              token_idx=args.token_idx, model_type=model_type, use_decoder=args.use_decoder)
+        save_generations(neg_non_hs, args, generation_type="neg_non_hidden_states")
+        save_generations(pos_non_hs, args, generation_type="pos_non_hidden_states")
+    else:
+        neg_hs, pos_hs, y = get_all_hidden_states(model, dataloader, layer=args.layer, all_layers=args.all_layers, 
                                               token_idx=args.token_idx, model_type=model_type, use_decoder=args.use_decoder)
 
     # Save the hidden states and labels

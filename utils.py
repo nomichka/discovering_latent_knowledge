@@ -19,6 +19,8 @@ from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForMaske
 from datasets import load_dataset
 
 from sklearn.decomposition import PCA
+from sklearn.preprocessing import scale, normalize
+from sklearn import preprocessing
 
 ############# Model loading and result saving #############
 
@@ -53,6 +55,7 @@ def get_parser():
     parser.add_argument("--num_examples", type=int, default=1000, help="Number of examples to generate")
     parser.add_argument("--context_num", type=int, default=10, help="Number of context examples")
     parser.add_argument("--corrupt_prob", type=float, default=0.0, help="Probability of context corruption (by flipping the correct answer)")
+    parser.add_argument("--context_both", action="store_true", help="Whether to get data with and without context")
     # which hidden states we extract
     parser.add_argument("--use_decoder", action="store_true", help="Whether to use the decoder; only relevant if model_type is encoder-decoder. Uses encoder by default (which usually -- but not always -- works better)")
     parser.add_argument("--layer", type=int, default=-1, help="Which layer to use (if not all layers)")
@@ -114,7 +117,7 @@ def save_generations(generation, args, generation_type):
     """
     # construct the filename based on the args
     arg_dict = vars(args)
-    exclude_keys = ["save_dir", "cache_dir", "device"]
+    exclude_keys = ["save_dir", "cache_dir", "device", "token_idx", "batch_size", "parallelize", "split"]
     filename = generation_type + "__" + "__".join(['{}_{}'.format(k, v) for k, v in arg_dict.items() if k not in exclude_keys]) + ".npy".format(generation_type)
 
     # create save directory if it doesn't exist
@@ -128,19 +131,25 @@ def save_generations(generation, args, generation_type):
 def load_single_generation(args, generation_type="hidden_states"):
     # use the same filename as in save_generations
     arg_dict = vars(args)
-    exclude_keys = ["save_dir", "cache_dir", "device"]
+    exclude_keys = ["save_dir", "cache_dir", "device", "token_idx", "batch_size", "parallelize", "split"]
     filename = generation_type + "__" + "__".join(['{}_{}'.format(k, v) for k, v in arg_dict.items() if k not in exclude_keys]) + ".npy".format(generation_type)
     print("load from ", filename)
     return np.load(os.path.join(args.save_dir, filename))
 
 
 def load_all_generations(args):
+    if args.context_both:
+        print("load both hidden states")
+        neg_non_hs = load_single_generation(args, generation_type="neg_non_hidden_states")
+        pos_non_hs = load_single_generation(args, generation_type="pos_non_hidden_states")
     # load all the saved generations: neg_hs, pos_hs, and labels
     neg_hs = load_single_generation(args, generation_type="negative_hidden_states")
     pos_hs = load_single_generation(args, generation_type="positive_hidden_states")
     labels = load_single_generation(args, generation_type="labels")
-
-    return neg_hs, pos_hs, labels
+    if args.context_both:
+        return neg_hs, pos_hs, neg_non_hs, pos_non_hs, labels
+    else:
+        return neg_hs, pos_hs, labels
 
 
 ############# Data #############
@@ -426,6 +435,52 @@ def get_all_hidden_states(model, dataloader, layer=None, all_layers=True, token_
     all_gt_labels = np.concatenate(all_gt_labels, axis=0)
     return all_neg_hs, all_pos_hs, all_gt_labels
 
+def get_all_hidden_states_context_both(model, dataloader, layer=None, all_layers=True, token_idx=-1, model_type="encoder_decoder", use_decoder=False):
+    """
+    Given a model, a tokenizer, and a dataloader, returns the hidden states (corresponding to a given position index) in all layers for all examples in the dataloader,
+    along with the average log probs corresponding to the answer tokens
+
+    The dataloader should correspond to examples *with a candidate label already added* to each example.
+    E.g. this function should be used for "Q: Is 2+2=5? A: True" or "Q: Is 2+2=5? A: False", but NOT for "Q: Is 2+2=5? A: ".
+
+    Return:
+        - all_neg_hs, all_pos_hs: [num_examples, model_dim, num_layers]
+        - all_gt_labels: [num_examples]
+    """
+    all_pos_hs, all_neg_hs = [], []
+    all_pos_non_hs, all_neg_non_hs = [], []
+    all_gt_labels = []
+
+    model.eval()
+    for batch in tqdm(dataloader):
+        neg_ids, pos_ids, neg_noncontext_ids, pos_noncontext_ids, _, _, gt_label = batch
+        neg_hs = get_individual_hidden_states(model, neg_ids, layer=layer, all_layers=all_layers, token_idx=token_idx, 
+                                              model_type=model_type, use_decoder=use_decoder)
+        pos_hs = get_individual_hidden_states(model, pos_ids, layer=layer, all_layers=all_layers, token_idx=token_idx, 
+                                              model_type=model_type, use_decoder=use_decoder)
+        
+        neg_noncontext_hs = get_individual_hidden_states(model, neg_noncontext_ids, layer=layer, all_layers=all_layers, token_idx=token_idx, 
+                                              model_type=model_type, use_decoder=use_decoder)
+        pos_noncontext_hs = get_individual_hidden_states(model, pos_noncontext_ids, layer=layer, all_layers=all_layers, token_idx=token_idx, 
+                                              model_type=model_type, use_decoder=use_decoder)
+
+        # The batch problem is already fixed in <get_individual_hidden_states>
+        # if dataloader.batch_size == 1:
+        #     neg_hs, pos_hs = neg_hs.unsqueeze(0), pos_hs.unsqueeze(0)
+        
+        all_neg_hs.append(neg_hs)
+        all_pos_hs.append(pos_hs)
+        all_neg_non_hs.append(neg_noncontext_hs)
+        all_pos_non_hs.append(pos_noncontext_hs)
+        all_gt_labels.append(gt_label)
+    
+    all_neg_hs = np.concatenate(all_neg_hs, axis=0)
+    all_pos_hs = np.concatenate(all_pos_hs, axis=0)
+    all_neg_non_hs = np.concatenate(all_neg_non_hs, axis=0)
+    all_pos_non_hs = np.concatenate(all_pos_non_hs, axis=0)
+    all_gt_labels = np.concatenate(all_gt_labels, axis=0)
+    return all_neg_hs, all_pos_hs, all_neg_non_hs, all_pos_non_hs, all_gt_labels
+
 ############# CCS #############
 class MLPProbe(nn.Module):
     def __init__(self, d):
@@ -565,12 +620,18 @@ class CCSPCA(object):
     def __init__(self, x0, x1, verbose=False, device="cuda", var_normalize=False):
         # data
         self.var_normalize = var_normalize
-        self.x0 = self.normalize(x0)
-        self.x1 = self.normalize(x1)
+        # self.x0 = self.normalize(x0)
+        # self.x1 = self.normalize(x1)
+        self.x0 = x0
+        self.x1 = x1
         self.d = self.x0.shape[-1]
 
         self.diff = self.x1 - self.x0   # [n, d] take the differences in normalized hidden states (pos-neg)
-
+        print(self.diff.sum())
+        self.diff = normalize(self.diff)
+        # diff = scale(diff)
+        scaler = preprocessing.StandardScaler()
+        diff = scaler.fit_transform(self.diff)
         # Create a PCA instance
         pca = PCA()
         diff_transformed = pca.fit_transform(self.diff)

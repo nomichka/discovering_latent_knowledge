@@ -23,7 +23,7 @@ class ContrastInContextDataset(Dataset):
     
     Truncates examples larger than max_len, which can mess up contrast pairs, so make sure to only give it examples that won't be truncated.
     """
-    def __init__(self, raw_dataset, tokenizer, context_num=10, corrupt_prob=0,
+    def __init__(self, raw_dataset, tokenizer, context_num=10, corrupt_prob=0, context_both=False,
                  model_type="encoder_decoder", use_decoder=False, device="cuda", text_key="content"):
 
         # data and tokenizer
@@ -47,6 +47,7 @@ class ContrastInContextDataset(Dataset):
         # context
         self.context_num = context_num
         self.corrupt_prob = corrupt_prob
+        self.context_both = context_both
 
         self.text_key = text_key
 
@@ -198,11 +199,10 @@ class ContrastInContextDataset(Dataset):
             neg_combined_input = neg_prompt + self.tokenizer.eos_token
             pos_combined_input = pos_prompt + self.tokenizer.eos_token
 
-
         neg_ids = self.tokenizer(neg_combined_input, truncation=True, padding="max_length", return_tensors="pt")
         pos_ids = self.tokenizer(pos_combined_input, truncation=True, padding="max_length", return_tensors="pt")
 
-        print("length of tokens", len(self.tokenizer.encode(neg_combined_input, truncation=False)))
+        # print("length of tokens", len(self.tokenizer.encode(neg_combined_input, truncation=False)))
 
 
         # verify these are different (e.g. tokenization didn't cut off the difference between them)
@@ -211,12 +211,19 @@ class ContrastInContextDataset(Dataset):
         else:
             assert (neg_ids["input_ids"] - pos_ids["input_ids"]).sum() != 0, print("The input_ids for the contrast pairs are the same!", neg_ids, pos_ids)
 
+        if not self.context_both:
+            # return the tokenized inputs, the text prompts, and the true label
+            return neg_ids, pos_ids, neg_prompt, pos_prompt, true_answer
+        else:
+            neg_noncontext_input = neg_prompt + self.tokenizer.eos_token
+            pos_noncontext_input = pos_prompt + self.tokenizer.eos_token
+            neg_noncontext_ids = self.tokenizer(neg_noncontext_input, truncation=True, padding="max_length", return_tensors="pt")
+            pos_noncontext_ids = self.tokenizer(pos_noncontext_input, truncation=True, padding="max_length", return_tensors="pt")
+            return neg_ids, pos_ids, neg_noncontext_ids, pos_noncontext_ids, neg_prompt, pos_prompt, true_answer
 
-        # return the tokenized inputs, the text prompts, and the true label
-        return neg_ids, pos_ids, neg_prompt, pos_prompt, true_answer
 
     
-def get_dataloader(dataset_name, split, tokenizer, batch_size=16, num_examples=1000, context_num=10, corrupt_prob=0.0,
+def get_dataloader(dataset_name, split, tokenizer, batch_size=16, num_examples=1000, context_num=10, corrupt_prob=0.0, context_both=False,
                    model_type="encoder_decoder", use_decoder=False, device="cuda", pin_memory=True, num_workers=1):
     """
     Creates a dataloader for a given dataset (and its split), tokenizer, and prompt index
@@ -236,7 +243,8 @@ def get_dataloader(dataset_name, split, tokenizer, batch_size=16, num_examples=1
         text_key = "sentence"
     # create the ConstrastDataset
     contrast_dataset = ContrastInContextDataset(raw_dataset, tokenizer, context_num=context_num, corrupt_prob=corrupt_prob,
-                                       model_type=model_type, use_decoder=use_decoder, device=device, text_key=text_key)
+                                                context_both=context_both, model_type=model_type, use_decoder=use_decoder, 
+                                                device=device, text_key=text_key)
     
     # get a random permutation of the indices; we'll take the first num_examples of these that do not get truncated
     random_idxs = np.random.permutation(len(contrast_dataset))
