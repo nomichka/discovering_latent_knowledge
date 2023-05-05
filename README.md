@@ -48,5 +48,5 @@ This code base was tested on Python 3.7.5 and PyTorch 1.12. It also uses the [da
 
 ## 3. Extending the CCS baselines with LogitLens
 
-This part is done by Chloe Loughridge. Go through `jupyter_notebook/chloe_tests.ipynb` for an overview. Also, look for logitlens.py files.
+This part is done by Chloe Loughridge. Go through `jupyter_notebook/logitlens.ipynb` for an overview. Also, look for logitlens.py files.
 
