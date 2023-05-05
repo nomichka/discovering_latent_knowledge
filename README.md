@@ -46,5 +46,7 @@ Here, `num_variants` refers to how many different paraphrase prompts you want to
 
 This code base was tested on Python 3.7.5 and PyTorch 1.12. It also uses the [datasets](https://pypi.org/project/datasets/) and [promptsource](https://github.com/bigscience-workshop/promptsource) packages for loading and formatting datasets. 
 
+## 3. Extending the CCS baselines with LogitLens
 
+This part is done by Chloe Loughridge. Go through `jupyter_notebook/chloe_tests.ipynb` for an overview. Also, look for logitlens.py files.
 
