@@ -2,8 +2,6 @@
 
 This repository is a fork of the original codebase https://github.com/collin-burns/discovering_latent_knowledge. For a detailed README.md file, please go to the their repository.
 
-The full paper can be found in directory `paper`.
-
 ## 1. Use logical conjunctions to find the “truth” direction of the classifier
 
 This part is done by Naomi Bashkansky. Go through `jupyter_notebook/conjunction.ipynb` for an overview.
